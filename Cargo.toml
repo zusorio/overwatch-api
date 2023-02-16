@@ -1,0 +1,18 @@
+[package]
+name = "ow-api"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+actix-web = "4"
+serde = { version = "1", features = ["derive"]}
+serde_repr = "0.1"
+reqwest = "0.11"
+scraper = "0.14"
+url = "2"
+anyhow = "1"
+num = "0.4"
+num-derive = "0.3.3"
+num-traits = "0.2.15"
