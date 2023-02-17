@@ -13,14 +13,14 @@ struct Battletag {
     discriminator: u32,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone, PartialEq)]
 enum Role {
     Tank,
     Damage,
     Support,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 enum Tier {
     Bronze,
     Silver,
@@ -31,7 +31,7 @@ enum Tier {
     Grandmaster,
 }
 
-#[derive(Serialize_repr, FromPrimitive)]
+#[derive(Serialize_repr, FromPrimitive, Clone)]
 #[repr(u8)]
 enum TierNumber {
     One = 1,
@@ -41,7 +41,7 @@ enum TierNumber {
     Five,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct Rank {
     role: Role,
     tier: Tier,
@@ -53,7 +53,9 @@ struct Player {
     battletag: String,
     name: String,
     discriminator: u32,
-    ranks: Vec<Rank>,
+    tank: Option<Rank>,
+    damage: Option<Rank>,
+    support: Option<Rank>,
 }
 
 /// extract path info using serde
@@ -167,7 +169,9 @@ async fn get_battletag(info: web::Path<Battletag>) -> Result<impl Responder> {
         battletag: format!("{}#{}", info.name, info.discriminator),
         name: info.name.clone(),
         discriminator: info.discriminator,
-        ranks,
+        tank: ranks.iter().find(|r| r.role == Role::Tank).cloned(),
+        damage: ranks.iter().find(|r| r.role == Role::Damage).cloned(),
+        support: ranks.iter().find(|r| r.role == Role::Support).cloned(),
     }))
 }
 
