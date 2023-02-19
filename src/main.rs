@@ -1,5 +1,3 @@
-// extern crate zeug brauch man seit ewigkeiten nicht mehr
-
 use actix_web::{
     error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound},
     get, web, App, HttpResponse, HttpServer, Responder, Result,
@@ -10,10 +8,13 @@ use reqwest::{StatusCode, Url};
 use scraper::Html;
 use serde::{Deserialize, Serialize};
 use serde_repr::Serialize_repr;
+use std::sync::Arc;
 use std::{fmt::Display, time::Instant};
+use tokio::sync::Semaphore;
 
 struct AppState {
     client: reqwest::Client,
+    semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -238,6 +239,8 @@ async fn get_battletag(
 ) -> Result<impl Responder> {
     let info = info.into_inner();
 
+    let permit = data.semaphore.acquire().await.unwrap();
+
     let start = Instant::now();
     let res = data
         .client
@@ -249,11 +252,10 @@ async fn get_battletag(
         .await
         .map_err(ErrorInternalServerError)?; // ErrorInternalServerError nimmt beliebigen error type
 
-    // dbg! macro nimmt keine format strings (wie in python print(a, b))
-    // und gibts btw auch in stderr aus statt stdout
+    drop(permit);
+
     println!("Request took {:?}", start.elapsed());
 
-    // Hätt ich auch so gemacht aber wollt dirs mit match zeigen
     match res.status() {
         StatusCode::NOT_FOUND => Err(ErrorNotFound("Player not found")),
         status if !status.is_success() => Err(ErrorInternalServerError("Failed getting player")),
@@ -282,7 +284,7 @@ async fn get_battletag(
     println!("Parsing took {:?}", start.elapsed());
 
     let battletag = Battletag {
-        name: info.name, // No clone bc into_inner line 239
+        name: info.name,
         discriminator: info.discriminator,
     };
 
@@ -306,8 +308,6 @@ async fn index() -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    // Mag keine imports in scopes
-
     HttpServer::new(|| {
         // In closure to avoid clone
         let client = reqwest::ClientBuilder::new()
@@ -315,12 +315,14 @@ async fn main() -> std::io::Result<()> {
             .build()
             .expect("Could not build reqwest client");
 
+        let semaphore = Arc::new(Semaphore::new(20));
+
         App::new()
-            .app_data(web::Data::new(AppState { client }))
+            .app_data(web::Data::new(AppState { client, semaphore }))
             .service(index)
             .service(get_battletag)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }
