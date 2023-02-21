@@ -1,3 +1,6 @@
+use actix::Addr;
+use actix_cors::Cors;
+use actix_redis::{resp_array, Command, RedisActor, RespValue};
 use actix_web::{
     error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound},
     get, web, App, HttpResponse, HttpServer, Responder, Result,
@@ -7,14 +10,15 @@ use num_derive::FromPrimitive;
 use reqwest::{StatusCode, Url};
 use scraper::Html;
 use serde::{Deserialize, Serialize};
-use serde_repr::Serialize_repr;
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::sync::Arc;
-use std::{fmt::Display, time::Instant};
+use std::{env, fmt::Display, time::Instant};
 use tokio::sync::Semaphore;
 
 struct AppState {
     client: reqwest::Client,
-    semaphore: Arc<tokio::sync::Semaphore>,
+    semaphore: Arc<Semaphore>,
+    redis: Addr<RedisActor>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -29,14 +33,14 @@ impl Display for Battletag {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 enum Role {
     Tank,
     Damage,
     Support,
 }
 
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 enum Tier {
     Bronze,
     Silver,
@@ -47,7 +51,7 @@ enum Tier {
     Grandmaster,
 }
 
-#[derive(Serialize_repr, FromPrimitive, Clone)]
+#[derive(Serialize_repr, Deserialize_repr, FromPrimitive, Clone)]
 #[repr(u8)]
 enum TierNumber {
     One = 1,
@@ -57,15 +61,13 @@ enum TierNumber {
     Five,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Rank {
-    #[serde(skip_serializing)]
-    role: Role,
     tier: Tier,
     tier_number: TierNumber,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct Player {
     name: String,
     battletag: Battletag,
@@ -127,7 +129,7 @@ fn extract_title(document: &Html) -> Result<Option<String>> {
 // Verwendest du mehrmals plus alternative mit and_then
 fn url_file_name(url: &Url) -> Result<&str> {
     url.path_segments()
-        .and_then(std::iter::Iterator::last)
+        .and_then(Iterator::last)
         .ok_or_else(parsing_error)
 }
 
@@ -162,7 +164,7 @@ fn extract_endorsement(document: &Html) -> Result<u8> {
     Ok(endorsement)
 }
 
-fn extract_roles(document: &Html) -> Result<Vec<Rank>> {
+fn extract_roles(document: &Html) -> Result<(Option<Rank>, Option<Rank>, Option<Rank>)> {
     let role_wrapper_selector = scraper::Selector::parse(".Profile-playerSummary--roleWrapper")
         .map_err(|_| parsing_error())?;
 
@@ -170,7 +172,11 @@ fn extract_roles(document: &Html) -> Result<Vec<Rank>> {
         .map_err(|_| parsing_error())?;
     let tier_selector =
         scraper::Selector::parse(".Profile-playerSummary--rank").map_err(|_| parsing_error())?;
-    let mut ranks = Vec::new(); // No explicit type required (bc line 224)
+
+    let mut tank: Option<Rank> = None;
+    let mut damage: Option<Rank> = None;
+    let mut support: Option<Rank> = None;
+
     let rank_container = document.select(&role_wrapper_selector);
 
     for rank in rank_container {
@@ -221,14 +227,28 @@ fn extract_roles(document: &Html) -> Result<Vec<Rank>> {
                 .map_err(|_| ErrorInternalServerError("Found invalid tier number while parsing"))?,
         )
         .ok_or_else(parsing_error)?;
-
-        ranks.push(Rank {
-            role,
-            tier: tier_name,
-            tier_number,
-        });
+        match role {
+            Role::Tank => {
+                tank = Some(Rank {
+                    tier: tier_name,
+                    tier_number,
+                })
+            }
+            Role::Damage => {
+                damage = Some(Rank {
+                    tier: tier_name,
+                    tier_number,
+                })
+            }
+            Role::Support => {
+                support = Some(Rank {
+                    tier: tier_name,
+                    tier_number,
+                })
+            }
+        }
     }
-    Ok(ranks)
+    Ok((tank, damage, support))
 }
 
 /// extract path info using serde
@@ -239,6 +259,12 @@ async fn get_battletag(
 ) -> Result<impl Responder> {
     let info = info.into_inner();
 
+    let redis_command = resp_array!["GET", format!("{}-{}", info.name, info.discriminator)];
+    let redis_result = data.redis.send(Command(redis_command)).await;
+
+    if let Ok(Ok(RespValue::BulkString(data_stream))) = redis_result {
+        return Ok(web::Json(serde_json::from_slice::<Player>(&data_stream)?));
+    }
     let permit = data.semaphore.acquire().await.unwrap();
 
     let start = Instant::now();
@@ -279,26 +305,45 @@ async fn get_battletag(
     let profile_picture = extract_profile_picture(&document)?;
     let title = extract_title(&document)?;
     let endorsement = extract_endorsement(&document)?;
-    let ranks = extract_roles(&document)?;
+    let (tank, damage, support) = extract_roles(&document)?;
 
     println!("Parsing took {:?}", start.elapsed());
 
     let battletag = Battletag {
-        name: info.name,
+        name: info.name.clone(),
         discriminator: info.discriminator,
     };
 
-    Ok(web::Json(Player {
+    let player = Player {
         name: battletag.to_string(), // Display trait von Battletag
         battletag,
         private: private_profile,
         profile_picture,
         title,
         endorsement,
-        tank: ranks.iter().find(|r| r.role == Role::Tank).cloned(),
-        damage: ranks.iter().find(|r| r.role == Role::Damage).cloned(),
-        support: ranks.iter().find(|r| r.role == Role::Support).cloned(),
-    }))
+        tank,
+        damage,
+        support,
+    };
+
+    let player_json = serde_json::to_string(&player);
+
+    if let Ok(player_json) = player_json {
+        let redis_command = resp_array![
+            "SET",
+            format!("{}-{}", info.name, info.discriminator),
+            player_json,
+            "EX",
+            "600"
+        ];
+        let redis_result = data.redis.send(Command(redis_command)).await;
+
+        if let Err(e) = redis_result {
+            println!("Redis error: {:?}", e);
+        }
+    }
+
+    Ok(web::Json(player))
 }
 
 #[get("/")]
@@ -317,8 +362,14 @@ async fn main() -> std::io::Result<()> {
 
         let semaphore = Arc::new(Semaphore::new(20));
 
+        let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "127.0.0.1:6379".to_string());
+
+        let redis = RedisActor::start(redis_url);
+
+
         App::new()
-            .app_data(web::Data::new(AppState { client, semaphore }))
+            .wrap(Cors::permissive())
+            .app_data(web::Data::new(AppState { client, semaphore, redis }))
             .service(index)
             .service(get_battletag)
     })
