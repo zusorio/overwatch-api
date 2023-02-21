@@ -77,7 +77,7 @@ struct Player {
     name: String,
     battletag: Battletag,
     private: bool,
-    profile_picture: Option<String>,
+    portrait: Option<String>,
     title: Option<String>,
     endorsement: u8,
     tank: Option<Rank>,
@@ -174,7 +174,7 @@ async fn get_battletag(
 
     debug!(request_log, "Extracting data from page");
 
-    let profile_picture = extractors::extract_profile_picture(&document)?;
+    let portrait = extractors::extract_portrait(&document)?;
     let title = extractors::extract_title(&document)?;
     let endorsement = extractors::extract_endorsement(&document)?;
     let (tank, damage, support) = extractors::extract_roles(&document)?;
@@ -190,7 +190,7 @@ async fn get_battletag(
         name: battletag.to_string(),
         battletag,
         private: private_profile,
-        profile_picture,
+        portrait,
         title,
         endorsement,
         tank,

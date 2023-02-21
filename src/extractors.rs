@@ -5,12 +5,12 @@ use scraper::Html;
 use crate::{Rank, Role, Tier, TierNumber};
 use url::Url;
 
-pub fn extract_profile_picture(document: &Html) -> actix_web::Result<Option<String>> {
-    let profile_picture_selector = scraper::Selector::parse(".Profile-player--portrait")
+pub fn extract_portrait(document: &Html) -> actix_web::Result<Option<String>> {
+    let portrait_selector = scraper::Selector::parse(".Profile-player--portrait")
         .map_err(|_| crate::parsing_error())?;
 
     Ok(document
-        .select(&profile_picture_selector)
+        .select(&portrait_selector)
         .next()
         .ok_or_else(crate::parsing_error)?
         .value()
