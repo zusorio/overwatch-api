@@ -53,37 +53,36 @@
 <body class="dark:bg-slate-800">
 <div class="mx-auto prose lg:prose-xl dark:prose-invert p-6">
   <h1>Very Cool Overwatch API by Zusor</h1>
-  <p>What if there was an API to get some basic Overwatch data and it was written using Rust wowee that would be really
-    cool</p>
-  <p>Anyway make a <code>GET</code> request to <a href="/player/Zusor-2553"><code>/player/Zusor-2553</code></a> to get the following data:</p>
-  <pre>
-{
-    "battletag": {
-        "name": "Zusor"
-        "discriminator": 2553,
-    },
-    "name": "Zusor#2553",
-    "endorsement": 3,
-    "private": false,
-    "title": "Neogun"
-    "profile_picture": "https://d15f34w2p8l1cc.cloudfront.net/overwatch/d3e03d1b5b0b85f3cf98847cfd0a396a311a370363c46245e254ce2e3a040527.png",
-    "tank": {
-        "tier": "Master",
-        "tier_number": 2
-    },
-    "damage": {
-        "tier": "Diamond",
-        "tier_number": 5
-    },
-    "support": {
-        "tier": "Platinum",
-        "tier_number": 2
-    },
-}</pre>
+  <p>
+    Blizzard doesn't have an official API for getting Overwatch player data. They do have <a href="https://playoverwatch.com/en-us/search/" target="_blank">a website</a> which shows some limited data but it's not easily machine-readable.
+  </p>
+  <p>
+    So I built my own.
+  </p>
+  <p>
+    To use it, make a <code>GET</code> request to <a href="/v1/player/Zusor-2553"><code>/v1/player/Zusor-2553</code></a>.
+  </p>
+
+  <p>
+    To learn more, check out the <a href="/docs">interactive docs</a>.
+  </p>
+
+  <p>
+    There are some other unofficial APIs which inspired this project (<a href="//ow-api.com/">ow-api</a> and the now-defunct <a href="//github.com/s32x/ovrstat">ovrstat</a>), but they're missing some new Overwatch 2 features and include a lot of data that I don't need.
+  </p>
+
+  <p>
+    I also used this project as a way to learn Rust and tried to focus on making it as fast as possible. Workers are distributed globally (using
+    <a href="//fly.io">fly.io</a>) to minimize latency and player data is cached for 10 minutes.
+  </p>
+
+  <p>
+    The code is MIT-licensed and available at <a href="//github.com/zusorio/overwatch-api">GitHub</a>.
+  </p>
 </div>
 <a href="https://zusor.io" rel="noopener" target="_blank" class="sm:fixed block mx-auto bottom-0 right-0 h-24 w-24 p-5">
   <svg clip-rule="evenodd" fill-rule="evenodd" stroke-linecap="round" stroke-linejoin="round" stroke-miterlimit="1.5"
-       viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" class="fill-white">
+       viewBox="0 0 1000 1000" xmlns="http://www.w3.org/2000/svg" class="dark:fill-white">
     <g transform="matrix(4.88094 0 0 4.88094 -4679.27 -2629.27)">
       <path
         d="m958.682 743.56c113.148 0 204.878-91.727 204.878-204.879l-44.78.001c0 88.418-71.68 160.095-160.098 160.095zm117.308 0c20.94-12.011 39.86-27.14 56.13-44.762h31.44v44.762zm3.64-160.117h-120.948v-44.762l128.928.001c0 15.736-2.82 30.813-7.98 44.761z"

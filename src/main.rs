@@ -88,7 +88,10 @@ fn parsing_error() -> actix_web::Error {
     ErrorInternalServerError("Could not parse page")
 }
 
-#[api_v2_operation]
+#[api_v2_operation(
+    summary = "Get data from a battletag",
+    description = "Gets basic data like ranks and profile customization from a battletag by scraping the Overwatch website. Cached for 10 minutes."
+)]
 async fn get_battletag(
     info: web::Path<Battletag>,
     data: web::Data<AppState>,
@@ -244,7 +247,7 @@ async fn main() -> std::io::Result<()> {
             .wrap_api()
             .wrap(Cors::permissive())
             .app_data(web::Data::new(AppState { client, semaphore, redis_pool: pool.clone(), log: log.clone()}))
-            .service(web::resource("/player/{name}-{numbers}").route(web::get().to(get_battletag)))
+            .service(web::resource("/v1/player/{name}-{numbers}").route(web::get().to(get_battletag)))
             .with_json_spec_at("/api/spec/v2")
             .with_swagger_ui_at("/docs")
             .build()
