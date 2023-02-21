@@ -1,8 +1,7 @@
 use actix_web::error::{ErrorBadRequest, ErrorInternalServerError};
-use num_traits::FromPrimitive;
 use scraper::Html;
 
-use crate::{Rank, Role, Tier, TierNumber};
+use crate::{Group, Rank, Role};
 use url::Url;
 
 pub fn extract_portrait(document: &Html) -> actix_web::Result<Option<String>> {
@@ -45,7 +44,6 @@ pub fn extract_title(document: &Html) -> actix_web::Result<Option<String>> {
     ))
 }
 
-// Verwendest du mehrmals plus alternative mit and_then
 fn url_file_name(url: &Url) -> actix_web::Result<&str> {
     url.path_segments()
         .and_then(Iterator::last)
@@ -127,46 +125,28 @@ pub fn extract_roles(
             _ => return Err(ErrorInternalServerError("Found invalid role while parsing")),
         };
 
-        // splitn macht soweit ich weiß keinen Unterschied
         let mut tier_parts = url_file_name(&tier_url)?.split('-');
-        let tier_name = match tier_parts.next().ok_or_else(crate::parsing_error)? {
-            "BronzeTier" => Tier::Bronze,
-            "SilverTier" => Tier::Silver,
-            "GoldTier" => Tier::Gold,
-            "PlatinumTier" => Tier::Platinum,
-            "DiamondTier" => Tier::Diamond,
-            "MasterTier" => Tier::Master,
-            "GrandmasterTier" => Tier::Grandmaster,
+        let group = match tier_parts.next().ok_or_else(crate::parsing_error)? {
+            "BronzeTier" => Group::Bronze,
+            "SilverTier" => Group::Silver,
+            "GoldTier" => Group::Gold,
+            "PlatinumTier" => Group::Platinum,
+            "DiamondTier" => Group::Diamond,
+            "MasterTier" => Group::Master,
+            "GrandmasterTier" => Group::Grandmaster,
             _ => return Err(ErrorInternalServerError("Found invalid tier while parsing")),
         };
 
-        let tier_number: TierNumber = FromPrimitive::from_u8(
-            tier_parts
-                .next()
-                .ok_or_else(crate::parsing_error)?
-                .parse::<u8>()
-                .map_err(|_| ErrorInternalServerError("Found invalid tier number while parsing"))?,
-        )
-        .ok_or_else(crate::parsing_error)?;
+        let tier = tier_parts
+            .next()
+            .ok_or_else(crate::parsing_error)?
+            .parse::<u8>()
+            .map_err(|_| ErrorInternalServerError("Found invalid tier number while parsing"))?;
+
         match role {
-            Role::Tank => {
-                tank = Some(Rank {
-                    tier: tier_name,
-                    tier_number,
-                })
-            }
-            Role::Damage => {
-                damage = Some(Rank {
-                    tier: tier_name,
-                    tier_number,
-                })
-            }
-            Role::Support => {
-                support = Some(Rank {
-                    tier: tier_name,
-                    tier_number,
-                })
-            }
+            Role::Tank => tank = Some(Rank { group, tier }),
+            Role::Damage => damage = Some(Rank { group, tier }),
+            Role::Support => support = Some(Rank { group, tier }),
         }
     }
     Ok((tank, damage, support))

@@ -1,18 +1,21 @@
 use actix_cors::Cors;
 use actix_web::{
     error::{ErrorBadRequest, ErrorInternalServerError, ErrorNotFound},
-    get, web, App, HttpResponse, HttpServer, Responder, Result,
+    get, App, HttpResponse, HttpServer, Responder, Result,
 };
+use paperclip::actix::{
+    api_v2_operation,
+    web::{self, Json},
+    Apiv2Schema, OpenApiExt,
+};
+
 use bb8_redis::{bb8, redis::AsyncCommands, RedisConnectionManager};
-use reqwest::StatusCode;
 use scraper::Html;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 
-use num_derive::FromPrimitive;
 use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::fmt::Display;
 
 use slog::{debug, error, info, o, Drain, Logger};
@@ -26,27 +29,26 @@ struct AppState {
     log: Logger,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Apiv2Schema, Serialize, Deserialize)]
 pub struct Battletag {
     name: String,
-    discriminator: u32,
+    numbers: u32,
 }
 
 impl Display for Battletag {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}#{}", self.name, self.discriminator)
+        write!(f, "{}#{}", self.name, self.numbers)
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 enum Role {
     Tank,
     Damage,
     Support,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-enum Tier {
+#[derive(Serialize, Deserialize, Debug, Clone, Apiv2Schema)]
+enum Group {
     Bronze,
     Silver,
     Gold,
@@ -56,23 +58,13 @@ enum Tier {
     Grandmaster,
 }
 
-#[derive(Serialize_repr, Deserialize_repr, FromPrimitive, Clone)]
-#[repr(u8)]
-enum TierNumber {
-    One = 1,
-    Two,
-    Three,
-    Four,
-    Five,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Apiv2Schema)]
 pub struct Rank {
-    tier: Tier,
-    tier_number: TierNumber,
+    group: Group,
+    tier: u8,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Apiv2Schema)]
 struct Player {
     name: String,
     battletag: Battletag,
@@ -96,16 +88,16 @@ fn parsing_error() -> actix_web::Error {
     ErrorInternalServerError("Could not parse page")
 }
 
-#[get("/player/{name}-{discriminator}")]
+#[api_v2_operation]
 async fn get_battletag(
     info: web::Path<Battletag>,
     data: web::Data<AppState>,
-) -> Result<impl Responder> {
+) -> Result<Json<Player>, actix_web::Error> {
     let info = info.into_inner();
 
     let request_log = data
         .log
-        .new(o!("battletag" => format!("{}-{}", info.name.clone(), info.discriminator) ));
+        .new(o!("battletag" => format!("{}-{}", info.name.clone(), info.numbers) ));
 
     info!(request_log, "Getting player");
 
@@ -117,7 +109,7 @@ async fn get_battletag(
 
     debug!(request_log, "Checking redis cache");
     let redis_result: redis::RedisResult<String> = redis_connection
-        .get(format!("{}-{}", info.name, info.discriminator))
+        .get(format!("{}-{}", info.name, info.numbers))
         .await;
 
     if let Ok(player) = redis_result {
@@ -125,9 +117,7 @@ async fn get_battletag(
         let player: Player = serde_json::from_str(&player).map_err(|_| parsing_error())?;
 
         debug!(request_log, "Returning cached player");
-        return Ok(HttpResponse::Ok()
-            .insert_header(("X-Cache", "HIT"))
-            .json(player));
+        return Ok(Json(player));
     }
 
     let permit = data.semaphore.acquire().await.map_err(|e| {
@@ -140,7 +130,7 @@ async fn get_battletag(
         .client
         .get(format!(
             "https://overwatch.blizzard.com/en-us/career/{}-{}",
-            info.name, info.discriminator
+            info.name, info.numbers
         ))
         .send()
         .await
@@ -153,7 +143,7 @@ async fn get_battletag(
     drop(permit);
 
     match res.status() {
-        StatusCode::NOT_FOUND => Err(ErrorNotFound("Player not found")),
+        reqwest::StatusCode::NOT_FOUND => Err(ErrorNotFound("Player not found")),
         status if !status.is_success() => Err(ErrorInternalServerError("Failed getting player")),
         _ => Ok(()),
     }?;
@@ -183,7 +173,7 @@ async fn get_battletag(
 
     let battletag = Battletag {
         name: info.name.clone(),
-        discriminator: info.discriminator,
+        numbers: info.numbers,
     };
 
     let player = Player {
@@ -205,11 +195,7 @@ async fn get_battletag(
     if let Ok(player_json) = player_json {
         debug!(request_log, "Caching player in redis");
         let redis_result: redis::RedisResult<String> = redis_connection
-            .set_ex(
-                format!("{}-{}", info.name, info.discriminator),
-                player_json,
-                600,
-            )
+            .set_ex(format!("{}-{}", info.name, info.numbers), player_json, 600)
             .await;
 
         if let Err(e) = redis_result {
@@ -219,9 +205,10 @@ async fn get_battletag(
 
     info!(request_log, "Responding with player");
 
-    Ok(HttpResponse::Ok()
-        .insert_header(("X-Cache", "MISS"))
-        .json(player))
+    // Ok(HttpResponse::Ok()
+    //     .insert_header(("X-Cache", "MISS"))
+    //     .json(player))
+    Ok(Json(player))
 }
 
 #[get("/")]
@@ -245,7 +232,6 @@ async fn main() -> std::io::Result<()> {
     info!(log, "Starting server on port 8080");
 
     HttpServer::new(move || {
-        // In closure to avoid clone
         let client = reqwest::ClientBuilder::new()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36")
             .build()
@@ -254,10 +240,14 @@ async fn main() -> std::io::Result<()> {
         let semaphore = Arc::new(Semaphore::new(20));
 
         App::new()
+            .service(index)
+            .wrap_api()
             .wrap(Cors::permissive())
             .app_data(web::Data::new(AppState { client, semaphore, redis_pool: pool.clone(), log: log.clone()}))
-            .service(index)
-            .service(get_battletag)
+            .service(web::resource("/player/{name}-{numbers}").route(web::get().to(get_battletag)))
+            .with_json_spec_at("/api/spec/v2")
+            .with_swagger_ui_at("/docs")
+            .build()
     })
     .bind(("0.0.0.0", 8080))?
     .run()
