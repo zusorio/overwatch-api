@@ -236,6 +236,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let client = reqwest::ClientBuilder::new()
+            .http1_only()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36")
             .build()
             .expect("Could not build reqwest client");
