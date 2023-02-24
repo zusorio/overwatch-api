@@ -18,6 +18,7 @@ use tokio::sync::Semaphore;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
+use crate::extractors::Platform;
 use slog::{debug, error, info, o, Drain, Logger};
 
 mod extractors;
@@ -64,6 +65,13 @@ pub struct Rank {
     tier: u8,
 }
 
+#[derive(Serialize, Deserialize, Clone, Apiv2Schema)]
+pub struct RankGroup {
+    tank: Option<Rank>,
+    damage: Option<Rank>,
+    support: Option<Rank>,
+}
+
 #[derive(Serialize, Deserialize, Apiv2Schema)]
 struct Player {
     name: String,
@@ -72,9 +80,8 @@ struct Player {
     portrait: Option<String>,
     title: Option<String>,
     endorsement: u8,
-    tank: Option<Rank>,
-    damage: Option<Rank>,
-    support: Option<Rank>,
+    pc: RankGroup,
+    console: RankGroup,
 }
 
 fn configure_log() -> Logger {
@@ -84,7 +91,6 @@ fn configure_log() -> Logger {
     Logger::root(drain, o!())
 }
 
-// todo: investigate cya-11112
 fn parsing_error() -> actix_web::Error {
     ErrorInternalServerError("Could not parse page")
 }
@@ -171,13 +177,27 @@ async fn get_battletag(
     let portrait = extractors::extract_portrait(&document)?;
     let title = extractors::extract_title(&document)?;
     let endorsement = extractors::extract_endorsement(&document)?;
-    let (tank, damage, support) = extractors::extract_roles(&document)?;
+    let (tank_pc, damage_pc, support_pc) = extractors::extract_roles(&document, Platform::Pc)?;
+    let (tank_console, damage_console, support_console) =
+        extractors::extract_roles(&document, Platform::Console)?;
 
     debug!(request_log, "Done extracting data from page");
 
     let battletag = Battletag {
         name: info.name.clone(),
         numbers: info.numbers,
+    };
+
+    let pc = RankGroup {
+        tank: tank_pc,
+        damage: damage_pc,
+        support: support_pc,
+    };
+
+    let console = RankGroup {
+        tank: tank_console,
+        damage: damage_console,
+        support: support_console,
     };
 
     let player = Player {
@@ -187,9 +207,8 @@ async fn get_battletag(
         portrait,
         title,
         endorsement,
-        tank,
-        damage,
-        support,
+        pc,
+        console,
     };
 
     debug!(request_log, "Constructing response");

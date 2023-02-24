@@ -81,14 +81,33 @@ pub fn extract_endorsement(document: &Html) -> actix_web::Result<u8> {
     Ok(endorsement)
 }
 
+pub enum Platform {
+    Pc,
+    Console,
+}
+
 pub fn extract_roles(
     document: &Html,
+    region: Platform,
 ) -> actix_web::Result<(Option<Rank>, Option<Rank>, Option<Rank>)> {
-    let role_wrapper_selector = scraper::Selector::parse(".Profile-playerSummary--roleWrapper")
-        .map_err(|_| crate::parsing_error())?;
+    let role_wrapper_selector = match region {
+        Platform::Pc => {
+            scraper::Selector::parse(".mouseKeyboard-view>.Profile-playerSummary--roleWrapper")
+                .map_err(|e| ErrorInternalServerError(e.to_string()))?
+        }
+        Platform::Console => {
+            scraper::Selector::parse(".controller-view>.Profile-playerSummary--roleWrapper")
+                .map_err(|e| ErrorInternalServerError(e.to_string()))?
+        }
+    };
 
-    let role_selector = scraper::Selector::parse(".Profile-playerSummary--role>img")
-        .map_err(|_| crate::parsing_error())?;
+    let role_selector = match region {
+        Platform::Pc => scraper::Selector::parse(".Profile-playerSummary--role>img")
+            .map_err(|e| ErrorInternalServerError(e.to_string()))?,
+        Platform::Console => scraper::Selector::parse(".Profile-playerSummary--role>use")
+            .map_err(|e| ErrorInternalServerError(e.to_string()))?,
+    };
+
     let tier_selector = scraper::Selector::parse(".Profile-playerSummary--rank")
         .map_err(|_| crate::parsing_error())?;
 
@@ -102,19 +121,25 @@ pub fn extract_roles(
         let role_url = Url::parse(
             rank.select(&role_selector)
                 .next()
-                .ok_or_else(crate::parsing_error)?
+                .ok_or_else(|| ErrorInternalServerError("Could not find role url element"))?
                 .value()
-                .attr("src")
-                .ok_or_else(crate::parsing_error)?,
+                .attrs
+                .values()
+                .next()
+                .ok_or_else(|| {
+                    ErrorInternalServerError("Could not find role url element src tag")
+                })?,
         )
         .map_err(|_| ErrorBadRequest("Could not parse Role URL"))?;
         let tier_url = Url::parse(
             rank.select(&tier_selector)
                 .next()
-                .ok_or_else(crate::parsing_error)?
+                .ok_or_else(|| ErrorInternalServerError("Could not find tier url element"))?
                 .value()
                 .attr("src")
-                .ok_or_else(crate::parsing_error)?,
+                .ok_or_else(|| {
+                    ErrorInternalServerError("Could not find tier url element src tag")
+                })?,
         )
         .map_err(|_| ErrorBadRequest("Could not parse Tier URL"))?;
 
