@@ -1,3 +1,6 @@
+> [!WARNING]  
+> Unfortunately, Fly have significantly increased their prices which means I can no longer host this API.
+
 # Very Cool Overwatch API by Zusor
 
 Blizzard doesn't have an official API for getting Overwatch player data. They do have [a website](https://playoverwatch.com/en-us/search/) which shows some limited data but it's not easily machine-readable.
